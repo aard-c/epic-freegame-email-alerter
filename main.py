@@ -170,8 +170,8 @@ def main():
     old_titles = {g["title"] for g in old_games}
     new_games = [g for g in current_games if g["title"] not in old_titles]
 
-    if True:
-        html = build_html_email(current_games)
+    if new_games:
+        html = build_html_email(new_games)
         send_email(html)
         save_games(current_games)
         print("Email sent.")
