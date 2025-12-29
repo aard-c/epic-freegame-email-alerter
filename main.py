@@ -4,6 +4,7 @@ import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from datetime import datetime, timezone
 
 EPIC_API = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
 
@@ -11,20 +12,41 @@ EMAIL_ADDRESS = os.environ["EMAIL_ADDRESS"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
-def fetch_free_games ():
+def fetch_free_games():
     response = requests.get(EPIC_API)
     data = response.json()
-    
+
+    now = datetime.now(timezone.utc)
     games = []
+
     elements = data["data"]["Catalog"]["searchStore"]["elements"]
 
     for game in elements:
         promos = game.get("promotions")
-        if promos and promos.get("promotionalOffers"):
-            games.append({
-                "title": game["title"],
-                "url": f"https://store.epicgames.com/p/{game['productSlug']}"
-            })
+        if not promos:
+            continue
+
+        offers = promos.get("promotionalOffers", [])
+        if not offers:
+            continue
+
+        for offer in offers[0]["promotionalOffers"]:
+            start = datetime.fromisoformat(offer["startDate"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(offer["endDate"].replace("Z", "+00:00"))
+
+            if (
+                offer["discountSetting"]["discountPercentage"] == 100
+                and start <= now <= end
+            ):
+                slug = game.get("productSlug")
+                if not slug:
+                    continue
+
+                games.append({
+                    "title": game["title"],
+                    "url": f"https://store.epicgames.com/p/{slug}"
+                })
+
     return games
 
 def load_old_games():
