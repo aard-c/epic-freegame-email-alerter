@@ -13,31 +13,45 @@ EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
 def fetch_free_games():
-    response = requests.get(EPIC_API)
+    response = requests.get(EPIC_API, timeout=15)
     data = response.json()
 
     now = datetime.now(timezone.utc)
     games = []
 
-    elements = data["data"]["Catalog"]["searchStore"]["elements"]
+    elements = data.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", [])
 
     for game in elements:
-        promos = game.get("promotions")
-        if not promos:
+        promotions = game.get("promotions")
+        if not promotions:
             continue
 
-        offers = promos.get("promotionalOffers", [])
-        if not offers:
-            continue
+        promo_groups = []
+        promo_groups += promotions.get("promotionalOffers", [])
+        promo_groups += promotions.get("upcomingPromotionalOffers", [])
 
-        for offer in offers[0]["promotionalOffers"]:
-            start = datetime.fromisoformat(offer["startDate"].replace("Z", "+00:00"))
-            end = datetime.fromisoformat(offer["endDate"].replace("Z", "+00:00"))
+        for group in promo_groups:
+            for offer in group.get("promotionalOffers", []):
+                discount = offer.get("discountSetting", {}).get("discountPercentage")
+                if discount != 100:
+                    continue
 
-            if offer["discountSetting"]["discountPercentage"] == 100 and start <= now <= end:
+                start = offer.get("startDate")
+                end = offer.get("endDate")
+                if not start or not end:
+                    continue
+
+                start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+
+                if not (start_dt <= now <= end_dt):
+                    continue
+
                 slug = game.get("productSlug")
                 if not slug:
-                    continue
+                    mappings = game.get("offerMappings", [])
+                    if mappings:
+                        slug = mappings[0].get("pageSlug")
 
                 images = game.get("keyImages", [])
                 cover = None
@@ -47,11 +61,13 @@ def fetch_free_games():
                         break
 
                 games.append({
-                    "title": game["title"],
-                    "url": f"https://store.epicgames.com/p/{slug}",
-                    "end_date": end.strftime("%d %B %Y"),
+                    "title": game.get("title"),
+                    "url": f"https://store.epicgames.com/p/{slug}" if slug else "https://store.epicgames.com/free-games",
+                    "end_date": end_dt.strftime("%d %B %Y"),
                     "image": cover
                 })
+
+                break
 
     return games
 
@@ -65,9 +81,10 @@ def save_games(games):
     with open("last_games.json", "w") as f:
         json.dump(games, f, indent=2)
 
-def build_html_email(new_games):
+def build_html_email(games):
     cards = ""
-    for game in new_games:
+
+    for game in games:
         img_block = f"""
         <img src="{game['image']}" alt="{game['title']}" style="width:100%;border-radius:12px 12px 0 0;display:block;">
         """ if game["image"] else ""
@@ -77,9 +94,7 @@ def build_html_email(new_games):
           <td style="padding:0 0 24px 0;">
             <table width="100%" style="background:#1f1f1f;border-radius:12px;overflow:hidden;">
               <tr>
-                <td>
-                  {img_block}
-                </td>
+                <td>{img_block}</td>
               </tr>
               <tr>
                 <td style="padding:20px;">
