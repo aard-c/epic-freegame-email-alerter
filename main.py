@@ -16,58 +16,49 @@ def fetch_free_games():
     response = requests.get(EPIC_API, timeout=15)
     data = response.json()
 
-    now = datetime.now(timezone.utc)
     games = []
 
     elements = data.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", [])
 
     for game in elements:
-        promotions = game.get("promotions")
-        if not promotions:
+        promos = game.get("promotions")
+        if not promos:
             continue
 
-        promo_groups = []
-        promo_groups += promotions.get("promotionalOffers", [])
-        promo_groups += promotions.get("upcomingPromotionalOffers", [])
+        if not promos.get("promotionalOffers"):
+            continue
 
-        for group in promo_groups:
-            for offer in group.get("promotionalOffers", []):
-                discount = offer.get("discountSetting", {}).get("discountPercentage")
-                if discount != 100:
-                    continue
+        slug = game.get("productSlug")
+        if not slug:
+            mappings = game.get("offerMappings", [])
+            if mappings:
+                slug = mappings[0].get("pageSlug")
 
-                start = offer.get("startDate")
-                end = offer.get("endDate")
-                if not start or not end:
-                    continue
-
-                start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
-
-                if not (start_dt <= now <= end_dt):
-                    continue
-
-                slug = game.get("productSlug")
-                if not slug:
-                    mappings = game.get("offerMappings", [])
-                    if mappings:
-                        slug = mappings[0].get("pageSlug")
-
-                images = game.get("keyImages", [])
-                cover = None
-                for img in images:
-                    if img.get("type") in ["OfferImageWide", "DieselStoreFrontWide"]:
-                        cover = img.get("url")
-                        break
-
-                games.append({
-                    "title": game.get("title"),
-                    "url": f"https://store.epicgames.com/p/{slug}" if slug else "https://store.epicgames.com/free-games",
-                    "end_date": end_dt.strftime("%d %B %Y"),
-                    "image": cover
-                })
-
+        images = game.get("keyImages", [])
+        cover = None
+        for img in images:
+            if img.get("type") in ["OfferImageWide", "DieselStoreFrontWide"]:
+                cover = img.get("url")
                 break
+
+        end_date = "Limited time"
+
+        offers = promos.get("promotionalOffers", [])
+        if offers and offers[0].get("promotionalOffers"):
+            offer = offers[0]["promotionalOffers"][0]
+            if offer.get("endDate"):
+                try:
+                    end_dt = datetime.fromisoformat(offer["endDate"].replace("Z", "+00:00"))
+                    end_date = end_dt.strftime("%d %B %Y")
+                except:
+                    pass
+
+        games.append({
+            "title": game.get("title"),
+            "url": f"https://store.epicgames.com/p/{slug}" if slug else "https://store.epicgames.com/free-games",
+            "end_date": end_date,
+            "image": cover
+        })
 
     return games
 
