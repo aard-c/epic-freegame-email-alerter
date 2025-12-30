@@ -16,51 +16,55 @@ def fetch_free_games():
     response = requests.get(EPIC_API, timeout=15)
     data = response.json()
 
+    now = datetime.now(timezone.utc)
     games = []
 
     elements = data.get("data", {}).get("Catalog", {}).get("searchStore", {}).get("elements", [])
 
     for game in elements:
-        promos = game.get("promotions")
-        if not promos:
+        promotions = game.get("promotions")
+        if not promotions:
             continue
 
-        if not promos.get("promotionalOffers"):
-            continue
+        promo_groups = promotions.get("promotionalOffers", [])
 
-        slug = game.get("productSlug")
-        if not slug:
-            mappings = game.get("offerMappings", [])
-            if mappings:
-                slug = mappings[0].get("pageSlug")
+        for group in promo_groups:
+            for offer in group.get("promotionalOffers", []):
 
-        images = game.get("keyImages", [])
-        cover = None
-        for img in images:
-            if img.get("type") in ["OfferImageWide", "DieselStoreFrontWide"]:
-                cover = img.get("url")
-                break
+                # 1️⃣ Must be 100% discount (Epic's definition of free)
+                if offer.get("discountSetting", {}).get("discountPercentage") != 100:
+                    continue
 
-        end_date = "Limited time"
+                # 2️⃣ Must have valid time window
+                start = offer.get("startDate")
+                end = offer.get("endDate")
+                if not start or not end:
+                    continue
 
-        offers = promos.get("promotionalOffers", [])
-        if offers and offers[0].get("promotionalOffers"):
-            offer = offers[0]["promotionalOffers"][0]
-            if offer.get("endDate"):
-                try:
-                    end_dt = datetime.fromisoformat(offer["endDate"].replace("Z", "+00:00"))
-                    end_date = end_dt.strftime("%d %B %Y")
-                except:
-                    pass
+                start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
 
-        games.append({
-            "title": game.get("title"),
-            "url": f"https://store.epicgames.com/p/{slug}" if slug else "https://store.epicgames.com/free-games",
-            "end_date": end_date,
-            "image": cover
-        })
+                # 3️⃣ Must be free RIGHT NOW (kills ghost games)
+                if not (start_dt <= now <= end_dt):
+                    continue
+
+                # 4️⃣ Build store URL safely
+                slug = game.get("productSlug")
+                if not slug:
+                    mappings = game.get("offerMappings", [])
+                    if mappings:
+                        slug = mappings[0].get("pageSlug")
+
+                games.append({
+                    "title": game.get("title"),
+                    "url": f"https://store.epicgames.com/p/{slug}" if slug else "https://store.epicgames.com/free-games",
+                    "end_date": end_dt.strftime("%d %B %Y")
+                })
+
+                break  # one valid free promo is enough
 
     return games
+
 
 def load_old_games():
     if not os.path.exists("last_games.json"):
@@ -161,8 +165,8 @@ def main():
     old_titles = {g["title"] for g in old_games}
     new_games = [g for g in current_games if g["title"] not in old_titles]
 
-    if new_games:
-        html = build_html_email(new_games)
+    if True:
+        html = build_html_email(current_games)
         send_email(html)
         save_games(current_games)
         print("Email sent.")
