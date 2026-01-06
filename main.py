@@ -60,8 +60,8 @@ def fetch_free_games():
             "image": cover
         })
 
-    if len(games) > 1:
-        games = [games[-1]]
+    if len(games) > 2:
+        games = [games[-2]]
 
     return games
 
